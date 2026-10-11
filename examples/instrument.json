@@ -1,0 +1,15 @@
+{
+  "instruments": [
+    {
+      "id": "us:aapl",
+      "symbol": "AAPL",
+      "name": "Apple Inc.",
+      "exchange": "XNAS",
+      "country": "US",
+      "currency": "USD",
+      "sector": "Technology",
+      "asset_class": "STK",
+      "sec_cik": "320193"
+    }
+  ]
+}

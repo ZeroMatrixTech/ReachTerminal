@@ -1,0 +1,8 @@
+/build/
+/.local/
+/.env
+*.log
+*.pem
+__pycache__/
+/.DS_Store
+/private-data/
