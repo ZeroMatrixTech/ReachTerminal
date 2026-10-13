@@ -30,7 +30,7 @@ Requires a C++20 compiler, CMake >=3.20, PostgreSQL >=14, cpp-httplib >=0.18,
 nlohmann/json >=3.11, libcurl, OpenSSL and libxml2. Debian/Ubuntu packages:
 
 ```sh
-sudo apt-get install build-essential cmake ninja-build postgresql libpq-dev \
+sudo apt-get install build-essential cmake ninja-build pkg-config postgresql libpq-dev \
   libcpp-httplib-dev nlohmann-json3-dev libcurl4-openssl-dev libssl-dev libxml2-dev
 ./scripts/dev.sh
 ```
@@ -57,6 +57,24 @@ export REACH_DATABASE_URL='host=127.0.0.1 dbname=reachterminal user=reach'
 Create the database and role yourself first. The app applies `db/001_initial.sql`.
 Stop the development database with `./scripts/stop-db.sh` after stopping the server.
 
+## Runtime settings and shutdown
+
+| Variable | Use |
+|---|---|
+| `REACH_DATABASE_URL` | PostgreSQL connection for server and CLI; setting it skips the launcher's private database setup |
+| `REACH_PG_BIN` | PostgreSQL binary directory for local development setup |
+| `REACH_PG_PORT` | Private development database port (default `55433`) |
+| `REACH_BUILD_JOBS` | Development build parallelism (default `2`) |
+| `REACH_PORT` | Browser/API port (default `8787`) |
+| `REACH_ROOT` | Source/assets directory; defaults to the source path recorded at build time |
+| `REACH_SEC_USER_AGENT` | Contact user agent for optional SEC fetches |
+
+Run `./scripts/dev.sh` as a regular user. Stop the foreground server with Ctrl+C,
+then run `./scripts/stop-db.sh` for the launcher's private database. This script
+does not stop an external PostgreSQL instance. Stopping preserves `.local/pgdata`;
+restart with `./scripts/dev.sh`. Keep the source/assets directory available to the
+binary, or set `REACH_ROOT` to a directory containing `frontend/`, `db/` and `examples/`.
+
 ## Import your data
 
 Use the Data Center or the CLI:
@@ -69,7 +87,17 @@ Use the Data Center or the CLI:
 ./build/reachterminal export > /private/location/workspace.json
 ```
 
-The CLI uses the same `REACH_DATABASE_URL` as the server. Never commit account exports.
+The CLI uses `REACH_DATABASE_URL` from its own shell. The development launcher sets
+its connection only inside the launched process; another terminal must set it explicitly.
+From the repository root, with the development database running:
+
+```sh
+export REACH_DATABASE_URL="host='$PWD/.local/socket' port=55433 dbname=reachterminal"
+./build/reachterminal export > /private/location/workspace.json
+```
+
+Replace the output path with an existing private directory. If you changed
+`REACH_PG_PORT`, use that port here too. Never commit account exports.
 For live SEC fetching, set a real project/contact user agent before starting:
 
 ```sh
