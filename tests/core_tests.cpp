@@ -1,5 +1,6 @@
 #include "../backend/core.hpp"
 #include "../backend/imports.hpp"
+#include "../backend/market.hpp"
 #include <functional>
 #include <iostream>
 using namespace reach;
@@ -114,7 +115,8 @@ int main() {
         missing["fx"] = json::array({rate("2024-03-31", "1.2")});
         auto missingp = portfolio(missing, "2024-03-31");
         check(missingp["nav"].is_null() && missingp["realized_base"].is_null(),
-              "missing historical FX suppresses aggregate (review allegation disproved)");
+              "missing historical FX suppresses aggregate (review allegation "
+              "disproved)");
         rejects([&] { merge_data(empty_data(), {{"cashflows", json::array({leg1})}}); },
                 "unpaired FX leg");
         auto scoped = setup(
@@ -233,8 +235,8 @@ int main() {
         check(flex_import(xml) == flex_import(xml), "Flex stable repeated conversion");
         rejects(
             [] {
-                flex_import(
-                    "<!DOCTYPE foo [<!ENTITY x SYSTEM 'file:///etc/passwd'>]><foo>&x;</foo>");
+                flex_import("<!DOCTYPE foo [<!ENTITY x SYSTEM "
+                            "'file:///etc/passwd'>]><foo>&x;</foo>");
             },
             "XXE prohibited");
         rejects([] { flex_import("<FlexStatement><CorporateAction/></FlexStatement>"); },
@@ -252,6 +254,58 @@ int main() {
         duplicate_split["id"] = "second-split";
         rejects([&] { merge_data(split, {{"splits", json::array({duplicate_split})}}); },
                 "same date duplicate split rejected");
+        {
+            json av = {{"Meta Data",
+                        {{"2. Symbol", "TEST"},
+                         {"3. Last Refreshed", "2024-01-02"},
+                         {"5. Time Zone", "US/Eastern"}}},
+                       {"Time Series (Daily)",
+                        {{"2024-01-02",
+                          {{"1. open", "10.0000"},
+                           {"2. high", "12.0000"},
+                           {"3. low", "9.0000"},
+                           {"4. close", "11.0000"},
+                           {"5. volume", "100"}}}}}};
+            auto daily = alpha_daily_import(av, instrument());
+            check(daily["bars"].size() == 1 && daily["quotes"].size() == 1,
+                  "raw daily maps bar and valuation quote");
+            check(daily["quotes"][0]["price"] == "11" && daily["quotes"][0]["status"] == "eod",
+                  "raw close and EOD label");
+            auto md = merge_data(empty_data(), {{"instruments", json::array({instrument()})}});
+            md = merge_data(md, daily);
+            check(merge_data(md, daily) == md, "daily import idempotent");
+            auto unfinished = av;
+            unfinished["Time Series (Daily)"][today()] =
+                unfinished["Time Series (Daily)"]["2024-01-02"];
+            unfinished["Meta Data"]["3. Last Refreshed"] = today();
+            check(alpha_daily_import(unfinished, instrument())["bars"].size() == 1,
+                  "unfinished current day excluded");
+            auto revised = av;
+            revised["Time Series (Daily)"]["2024-01-02"]["4. close"] = "10.5";
+            rejects([&] { merge_data(md, alpha_daily_import(revised, instrument())); },
+                    "provider revision never silently overwrites");
+            auto wrong = av;
+            wrong["Meta Data"]["2. Symbol"] = "OTHER";
+            rejects([&] { alpha_daily_import(wrong, instrument()); },
+                    "wrong provider symbol rejected");
+            rejects([&] { alpha_daily_import({{"Information", "quota"}}, instrument()); },
+                    "quota message not treated as data");
+            auto invalid = av;
+            invalid["Time Series (Daily)"]["2024-01-02"]["2. high"] = "8";
+            rejects([&] { alpha_daily_import(invalid, instrument()); },
+                    "invalid provider candle rejected");
+            auto adjusted = av;
+            adjusted["Time Series (Daily Adjusted)"] = json::object();
+            rejects([&] { alpha_daily_import(adjusted, instrument()); },
+                    "adjusted series cannot value raw lots");
+            rejects([&] { alpha_daily_import(av, instrument("EUR")); },
+                    "currency mismatch rejected");
+            auto future = av;
+            future["Time Series (Daily)"]["2199-01-01"] =
+                future["Time Series (Daily)"]["2024-01-02"];
+            rejects([&] { alpha_daily_import(future, instrument()); },
+                    "future market data rejected");
+        }
         std::cout << json({{"ok", true}, {"checks", checks}}).dump() << '\n';
         return 0;
     } catch (const std::exception &e) {

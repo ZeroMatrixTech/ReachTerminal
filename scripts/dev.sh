@@ -27,12 +27,14 @@ if [[ -z "${REACH_DATABASE_URL:-}" ]]; then
   chmod 700 .local .local/socket
   if [[ ! -f .local/pgdata/PG_VERSION ]]; then "$pg_bin/initdb" -D .local/pgdata -A trust --no-locale --encoding=UTF8; fi
   pg_port="${REACH_PG_PORT:-55433}"
+  db_name="${REACH_DB_NAME:-reachterminal}"
+  [[ "$db_name" =~ ^[a-z][a-z0-9_]{0,62}$ ]] || { echo "Invalid REACH_DB_NAME" >&2; exit 1; }
   if ! "$pg_bin/pg_ctl" -D .local/pgdata status >/dev/null 2>&1; then
     "$pg_bin/pg_ctl" -D .local/pgdata -l .local/postgres.log -o "-k '$repo_dir/.local/socket' -p $pg_port -h ''" start
   fi
-  export REACH_DATABASE_URL="host='$repo_dir/.local/socket' port=$pg_port dbname=reachterminal"
-  if ! "$pg_bin/psql" "host='$repo_dir/.local/socket' port=$pg_port dbname=postgres" -tAc "SELECT 1 FROM pg_database WHERE datname='reachterminal'" | grep -qx 1; then
-    "$pg_bin/createdb" -h "$repo_dir/.local/socket" -p "$pg_port" reachterminal
+  export REACH_DATABASE_URL="host='$repo_dir/.local/socket' port=$pg_port dbname=$db_name"
+  if ! "$pg_bin/psql" "host='$repo_dir/.local/socket' port=$pg_port dbname=postgres" -tAc "SELECT 1 FROM pg_database WHERE datname='$db_name'" | grep -qx 1; then
+    "$pg_bin/createdb" -h "$repo_dir/.local/socket" -p "$pg_port" "$db_name"
   fi
 fi
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release "${cmake_args[@]}"

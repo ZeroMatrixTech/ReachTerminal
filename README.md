@@ -6,6 +6,12 @@ C++20 backend, PostgreSQL database. No broker order submission code.
 第一版将基本面研究、策略核算、估值与风险放在同一个本地工作区。
 软件不收取订阅费；第三方数据的费用、覆盖和使用权限仍由对应来源决定。
 
+## Real public data
+
+Run `./scripts/live.sh` for the separate real-data workspace on **http://127.0.0.1:8788**.
+SEC financials and US/USD raw daily OHLCV are connected. IBM works with the official
+public trial; other symbols need a personal free provider key. See [setup and measured coverage](docs/live-data.md).
+
 ## What works in 0.1.0
 
 - Six linked workspaces: portfolio, company research, valuation, risk/strategies,
