@@ -1,5 +1,6 @@
 #include "core.hpp"
 #include "imports.hpp"
+#include "market.hpp"
 #include "store.hpp"
 #include <filesystem>
 #include <httplib.h>
@@ -74,11 +75,14 @@ json metrics(const json &data, const std::string &instrument, const std::string 
     for (auto &[k, v] : f)
         if (days(str(v, "period_end"), asof) > 450)
             out["warnings"].push_back("Stale financial input: " + k);
-    out["basis"] = "Annual reported facts; market cap uses latest disclosed shares; OCF-capex "
+    out["basis"] = "Annual reported facts; market cap uses latest disclosed "
+                   "shares; OCF-capex "
                    "yield is not FCFF; ratios can mix price and report dates";
     research["metrics"] = out;
     research["instrument_info"] = ins;
     research["quote"] = quote;
+    if (!quote.is_null() && days(str(quote, "date"), asof) > 4)
+        research["metrics"]["warnings"].push_back("Price older than four calendar days");
     for (auto kind : {"bars", "news", "notes", "valuations", "estimates"}) {
         research[kind] = json::array();
         for (auto &v : data[kind])
@@ -103,8 +107,8 @@ int main(int argc, char **argv) {
             return 0;
         }
         if (command == "import" || command == "import-flex" || command == "import-sec") {
-            require(argc >= 3,
-                    "Usage: reachterminal import|import-flex FILE; import-sec FILE INSTRUMENT");
+            require(argc >= 3, "Usage: reachterminal import|import-flex FILE; "
+                               "import-sec FILE INSTRUMENT");
             auto body = read_file(argv[2]);
             json batch;
             if (command == "import-flex")
@@ -162,10 +166,11 @@ int main(int argc, char **argv) {
         server.set_post_routing_handler([](const auto &, auto &res) {
             res.set_header("X-Content-Type-Options", "nosniff");
             res.set_header("Referrer-Policy", "no-referrer");
-            res.set_header(
-                "Content-Security-Policy",
-                "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
-                "connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'");
+            res.set_header("Content-Security-Policy",
+                           "default-src 'self'; script-src 'self'; style-src 'self'; "
+                           "img-src 'self' data:; "
+                           "connect-src 'self'; frame-ancestors 'none'; object-src "
+                           "'none'; base-uri 'none'");
             res.set_header("Cache-Control", "no-store");
         });
         auto route = [&](const std::string &path, bool post, auto fn) {
@@ -236,8 +241,8 @@ int main(int argc, char **argv) {
             return json{{"counts", counts},
                         {"demo_present", demo},
                         {"imports", store.runs()},
-                        {"consensus",
-                         "User-supplied licensed records only; no bundled global consensus feed"},
+                        {"consensus", "User-supplied licensed records only; no "
+                                      "bundled global consensus feed"},
                         {"margin", "Broker margin estimation not implemented"}};
         });
         route("/api/export", false, [&](const auto &) { return store.load(); });
@@ -263,8 +268,45 @@ int main(int argc, char **argv) {
             require(std::chrono::steady_clock::now() - lastfetch > std::chrono::seconds(2),
                     "Wait two seconds between SEC fetches");
             lastfetch = std::chrono::steady_clock::now();
+            auto data = store.load();
+            bool bound = false;
+            for (auto &i : data["instruments"]) {
+                require(!str(i, "id").starts_with("demo:"), "Use a separate real-data database");
+                if (str(i, "id") == str(v, "instrument") && i.contains("sec_cik"))
+                    bound = std::stoull(str(i, "sec_cik")) == std::stoull(str(v, "cik"));
+            }
+            require(bound, "Registered SEC CIK must match requested CIK");
             auto raw = json::parse(fetch_sec(str(v, "cik"), env("REACH_SEC_USER_AGENT")));
             return store.import(sec_import(raw, str(v, "instrument")));
+        });
+        route("/api/providers", false, [&](const auto &) {
+            return json{{"sec_configured", !env("REACH_SEC_USER_AGENT").empty()},
+                        {"alpha_mode",
+                         env("REACH_ALPHA_API_KEY").empty() ? "IBM public trial" : "personal key"},
+                        {"daily_scope", "US/USD raw daily, compact 100 sessions; not realtime"}};
+        });
+        std::chrono::steady_clock::time_point last_daily{};
+        route("/api/market/daily", true, [&](const auto &req) {
+            auto v = json::parse(req.body);
+            auto data = store.load();
+            for (auto &r : data["instruments"])
+                require(!str(r, "id").starts_with("demo:"), "Use a separate real-data database");
+            json ins;
+            for (auto &i : data["instruments"])
+                if (str(i, "id") == str(v, "instrument"))
+                    ins = i;
+            require(!ins.is_null(), "Register the instrument first");
+            require(str(ins, "country") == "US" && str(ins, "currency") == "USD", "US/USD only");
+            require(std::chrono::steady_clock::now() - last_daily > std::chrono::seconds(15),
+                    "Wait 15 seconds between daily requests; provider daily quotas "
+                    "also apply");
+            last_daily = std::chrono::steady_clock::now();
+            auto raw = json::parse(
+                fetch_alpha_daily(str(ins, "symbol"), env("REACH_ALPHA_API_KEY", "demo")));
+            auto batch = alpha_daily_import(raw, ins);
+            auto result = store.import(batch);
+            result["latest"] = batch["raw_sources"][0]["date"];
+            return result;
         });
         route("/api/dcf", true, [&](const auto &req) { return dcf(json::parse(req.body)); });
         route("/api/stress", true, [&](const auto &req) {
