@@ -1,4 +1,5 @@
 #include "../backend/core.hpp"
+#include "../backend/ibkr.hpp"
 #include "../backend/imports.hpp"
 #include "../backend/market.hpp"
 #include <functional>
@@ -305,6 +306,72 @@ int main() {
                 future["Time Series (Daily)"]["2024-01-02"];
             rejects([&] { alpha_daily_import(future, instrument()); },
                     "future market data rejected");
+        }
+        {
+            check(ibkr_conid(265598) == "265598", "IBKR integer conid normalized");
+            rejects([] { ibkr_conid("../orders"); }, "IBKR conid cannot inject paths");
+            rejects([] { ibkr_settings({{"port", 5000}, {"api_key", "secret"}}); },
+                    "Gateway rejects API key config");
+            rejects([] { ibkr_settings({{"port", 5000}, {"url", "https://external.test"}}); },
+                    "Gateway cannot target external hosts");
+            rejects([] { ibkr_settings({{"port", 80}}); }, "Gateway privileged ports rejected");
+            rejects(
+                [] { ibkr_settings({{"port", 5000}, {"ca_pem", "-----BEGIN PRIVATE KEY-----"}}); },
+                "Private keys rejected");
+            auto rows = ibkr_search_rows(
+                json::array({{{"conid", "265598"},
+                              {"symbol", "AAPL"},
+                              {"accountId", "private"},
+                              {"sections", json::array({{{"secType", "STK"}}})}}}));
+            check(rows[0]["sections"][0] == "STK" && !rows[0].contains("accountId"),
+                  "IBKR search projects public fields only");
+            check(ibkr_search_rows(json::array({{{"conid", "-1"}, {"secType", "BOND"}},
+                                                {{"conid", "8314"}, {"symbol", "IBM"}}}))
+                          .size() == 1,
+                  "IBKR bond issuer sentinel does not discard valid contracts");
+            auto snap = ibkr_snapshot(json::array({{{"conid", 265598},
+                                                    {"31", "C193.18"},
+                                                    {"6509", "DpB"},
+                                                    {"73", "private position"}}}),
+                                      "265598");
+            check(snap["availability"] == "延迟" && !snap["pending"].get<bool>(),
+                  "IBKR delayed availability preserved");
+            check(snap["fields"][0]["value"] == "C193.18" &&
+                      snap.dump().find("private position") == std::string::npos,
+                  "IBKR prefix retained, position fields excluded");
+            check(ibkr_snapshot(json::array({{{"conid", 265598}}}), "265598")["pending"] == true,
+                  "IBKR preflight missingness retained");
+            check(ibkr_snapshot(json::array({{{"conid", 999}, {"31", "100"}}}),
+                                "265598")["pending"] == true,
+                  "wrong snapshot conid not consumed");
+        }
+        {
+            json bound = {{"port", 5000}, {"ca_pem", ""}, {"device_id", "device-a"}};
+            check(ibkr_bound_settings(bound, "device-a")["port"] == 5000,
+                  "IBKR settings accepted on owner device");
+            rejects([&] { ibkr_bound_settings(bound, "device-b"); },
+                    "IBKR cross-device settings rejected");
+            bound.erase("device_id");
+            rejects([&] { ibkr_bound_settings(bound, "device-a"); },
+                    "unbound legacy IBKR settings not inherited");
+        }
+        {
+            workspace_environment("user", "reachterminal_live");
+            workspace_environment("test", "reachterminal_test_unit");
+            rejects([] { workspace_environment("test", "reachterminal_live"); },
+                    "test runtime cannot open user database");
+            rejects([] { workspace_environment("user", "reachterminal_test_unit"); },
+                    "user runtime cannot open test database");
+            rejects([]{workspace_environment("user","reachterminal_demo_fixture");},"user runtime cannot open demo database");
+            rejects([] { gateway_environment("test", 5000); },
+                    "test runtime cannot reach real Gateway");
+            rejects([] { gateway_environment("user", 5001); },
+                    "user runtime cannot reach mock Gateway");
+            rejects([] { gateway_environment("demo", 5000); },
+                    "demo runtime cannot reach any Gateway");
+            rejects(
+                [] { user_batch("user", {{"instruments", json::array({{{"id", "demo:fake"}}})}}); },
+                "user workspace rejects synthetic demo batch");
         }
         std::cout << json({{"ok", true}, {"checks", checks}}).dump() << '\n';
         return 0;

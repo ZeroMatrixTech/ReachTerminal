@@ -1,3 +1,5 @@
+import { createGatewayMonitor } from "./gateway-session.js";
+import { releasePage } from "./release.js";
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 const escape = (v) =>
@@ -37,6 +39,9 @@ const names = {
   risk: "风险与策略",
   news: "新闻与研究",
   data: "数据中心",
+  hedge: "衍生品对冲",
+  margin: "保证金监控",
+  macro: "宏观数据",
 };
 let state = {
   page: "overview",
@@ -77,7 +82,13 @@ async function api(path, options = {}) {
   return data;
 }
 const post = (path, data) =>
-  api(path, { method: "POST", body: JSON.stringify(data) });
+  api(path, {
+    method: "POST",
+    body: JSON.stringify(data),
+    ...(path === "/api/ibkr/connection"
+      ? { signal: AbortSignal.timeout(55000) }
+      : {}),
+  });
 const qs = () => `as_of=${encodeURIComponent(state.asof)}`;
 function heading(eyebrow, title, sub, actions = "") {
   return `<div class="page-heading"><div><div class="eyebrow">${eyebrow}</div><h1>${title}</h1><p class="sub">${sub}</p></div><div class="actions">${actions}</div></div>`;
@@ -150,6 +161,7 @@ function emptyWorkspace() {
   );
 }
 async function render() {
+  gatewayMonitor.stop();
   const g = ++generation;
   $("#page-name").textContent = names[state.page];
   $$("#nav button").forEach((b) =>
@@ -159,9 +171,44 @@ async function render() {
   try {
     if (state.page === "data") {
       const data = await api("/api/data");
+      data.ibkr = await api("/api/ibkr/settings");
       if (g !== generation) return;
       state.data = data;
       renderData(data);
+      gatewayMonitor.check();
+      return;
+    }
+    if (["hedge", "margin", "macro"].includes(state.page)) {
+      await releasePage({
+        state,
+        api,
+        post,
+        escape,
+        fmt,
+        panel,
+        heading,
+        toast,
+        chart,
+        drawLine,
+        generationValid: () => g === generation,
+        reload: render,
+      });
+      return;
+    }
+    if (state.page === "news" && !state.instruments.length) {
+      const news = await api(`/api/news?${qs()}`);
+      if (g !== generation) return;
+      $("#content").innerHTML =
+        heading(
+          "INTELLIGENCE / OFFICIAL FEEDS",
+          "新闻与研究",
+          "官方新闻 · 按发布日期筛选",
+        ) +
+        panel(
+          "Federal Reserve",
+          '<div class="panel-body"><button id="fetch-fed" class="primary">获取美联储官方新闻</button></div>' +
+            newsCards(news),
+        );
       return;
     }
     if (!state.instruments.length) {
@@ -384,7 +431,7 @@ function renderNews(news, r) {
       "新闻与研究",
       "让信息连接到持仓，让投资论点留下可复盘的记录。",
     ) +
-    `<div class="grid equal-col">${panel("市场与公司事件", newsCards(news), "已导入来源 · 非实时新闻流")}${panel(
+    `<div class="panel-body"><button id="fetch-fed" class="primary">获取美联储官方新闻</button></div><div class="grid equal-col">${panel("市场与公司事件", newsCards(news), "已导入来源 · 非实时新闻流")}${panel(
       "投资论点 · " + escape(r.instrument_info.symbol),
       `<div class="panel-body"><form id="note-form" class="form-grid"><label class="wide">研究标题<input name="title" placeholder="投资逻辑 / 催化剂 / 风险因素" maxlength="200" required></label><label class="wide">论点与后续验证<textarea name="body" placeholder="记录证据、估值假设以及什么变化会推翻你的判断。" maxlength="2000" required></textarea></label><div class="wide"><button class="primary">保存研究笔记</button></div></form><div class="section-gap">${[
         ...r.notes,
@@ -417,7 +464,7 @@ function renderData(d) {
         ([k, n]) =>
           `<div><strong>${d.counts[k]}</strong><small>${n}</small></div>`,
       )
-      .join("")}</div><div class="grid equal-col">${panel(
+      .join("")}</div>${ibkrPanel(d.ibkr)}<div class="grid equal-col">${panel(
       "导入文件",
       `<div class="panel-body"><form id="import-form" class="form-grid"><label class="wide">文件格式<select name="format"><option value="normalized">ReachTerminal 标准 JSON</option><option value="flex">IBKR Flex XML（现金股票）</option><option value="sec">SEC CompanyFacts JSON</option></select></label><label class="wide">SEC 对应证券 ID（仅 SEC 导入使用）<input name="instrument" value="${escape(state.selected || "")}" placeholder="先创建证券，例如 us:aapl"></label><label class="wide">选择文件<input class="file-input" name="file" type="file" accept=".json,.xml" required></label><div class="wide"><button class="primary">校验并原子导入</button><p class="help">相同编号与内容可重复导入；相同编号但内容改变会拒绝。需从完整历史或明确的期初账本开始。Flex 不会自动推算缺失入金或换汇。</p></div></form><details><summary>标准格式、字段和样例</summary><p class="help">参考仓库 docs/data-contract.md 和 examples/。金额与数量用字符串，最多 6 位小数。每条财务记录须注明披露日期、期间、单位和来源。</p><pre>{ "instruments": [...], "trades": [...],
   "cashflows": [...], "facts": [...],
@@ -431,8 +478,165 @@ function renderData(d) {
             `<tr><td>${escape(r.created_at)}</td><td class="num">${r.inserted}</td><td class="num">${r.duplicates}</td></tr>`,
         ),
       ),
-    )}${panel("能力与数据覆盖", `<div class="panel-body"><p class="help">● 已实现：本地账本、策略内 FIFO、拆股、汇率估值、对账、财务版本、用户 FCFF 估值、线性股票压力测试。</p><p class="help">○ 全球一致预期：支持带来源的导入，无内置完整免费数据源。</p><p class="help">○ IBKR 实时账户与行情：当前通过 Flex 文件接入；未连接 TWS / Gateway。</p><p class="help">○ 衍生品、经纪商保证金、自动全球财报标准化：后续阶段。</p><p class="help">代码开源不自动授权第三方数据再分发。演示数据为合成资料。</p>${Object.values(d.counts).every((n) => !n) ? '<button id="load-demo">加载合成演示数据</button>' : ""}</div>`)}</div>`;
+    )}${panel("能力与数据覆盖", `<div class="panel-body"><p class="help">● 已实现：本地账本、策略内 FIFO、拆股、汇率估值、对账、财务版本、用户 FCFF 估值、线性股票压力测试。</p><p class="help">○ 全球一致预期：支持带来源的导入，无内置完整免费数据源。</p><p class="help">● IBKR 数据查询：已接入 Client Portal Gateway 的搜索、行情与日线预览；账户账本仍通过 Flex 导入。</p><p class="help">○ 衍生品、经纪商保证金、自动全球财报标准化：后续阶段。</p><p class="help">代码开源不自动授权第三方数据再分发。演示数据为合成资料。</p>${Object.values(d.counts).every((n) => !n) ? '<button id="load-demo">加载合成演示数据</button>' : ""}</div>`)}</div>`;
 }
+function ibkrPanel(settings) {
+  ibkrEpoch++;
+  ibkrSelected = null;
+  return panel(
+    "IBKR 数据连接",
+    `<div class="panel-body"><p class="help">本设备独立网关 · ${escape(settings.device)} · ${settings.configured ? "已配置" : "尚未配置，需在本机重新设置并登录"}。网关不可迁移或跨设备复用。个人账户使用 Client Portal Gateway 浏览器登录与双重验证，无通用 API Key。仅查询标的与数据。${link("https://www.interactivebrokers.com/docs/web-api/v1/endpoints/introduction", "官方连接说明 ↗")}</p><div class="grid equal-col"><div><form id="ibkr-settings-form" class="form-grid"><label>本机 Gateway 端口<input name="port" type="number" min="1024" max="65535" value="${escape(settings.port)}" required></label><label class="wide">网关公开 CA 证书 · PEM<textarea name="ca_pem" rows="3" placeholder="-----BEGIN CERTIFICATE-----"></textarea></label><div class="wide"><p class="help">连接固定为 https://localhost。留空使用系统信任；当前${settings.custom_ca ? "已配置自定义证书，留空重新保存将清除" : "使用系统证书"}。不关闭 TLS 校验，不填写账户密码或私钥。</p><button>保存连接设置</button></div></form><div class="actions section-gap">${settings.login_url ? `<a class="gateway-login" id="ibkr-login" href="${escape(settings.login_url)}" target="_blank" rel="noopener noreferrer">打开网关登录 ↗</a>` : `<span class="accent">隔离环境：禁止打开真实登录</span>`}<button id="ibkr-logout">登出网关</button><button id="ibkr-status">检测登录状态</button><button id="ibkr-connect-market">连接行情会话（不抢占）</button><button id="ibkr-prepare" disabled>准备行情</button></div><p id="ibkr-status-result" class="help" role="status" aria-live="polite">尚未检测。请先启动网关，并在其浏览器页面登录。</p></div><div><form id="ibkr-search-form" class="form-grid"><label>搜索内容<input name="query" placeholder="AAPL / Apple" maxlength="80" required></label><label>搜索方式<select name="mode"><option value="symbol">证券代码</option><option value="name">公司名称</option></select></label><div class="wide"><button class="primary">搜索 IBKR 标的</button></div></form><p class="help">确认 conid 和市场后选择标的。债券发行人分组（conid=-1）暂不支持，已从可选合约省略。查询预览独立于现有账本，不会写入持仓或覆盖日终估值。权限缺失时显示空值。</p><div id="ibkr-search-result"></div></div></div><div id="ibkr-selected" class="section-gap"></div><div id="ibkr-data-result"></div></div>`,
+  );
+}
+const gatewayMonitor = createGatewayMonitor({
+  post,
+  isCurrent: () =>
+    state.page === "data" && !ibkrLoggingOut && !!$("#ibkr-status-result"),
+  display: (m) => {
+    const el = $("#ibkr-status-result");
+    if (!el) return;
+    if (m.market_authenticated !== undefined) {
+      for (const id of ["ibkr-prepare", "ibkr-snapshot", "ibkr-history"]) {
+        const button = $("#" + id);
+        if (button) button.disabled = !m.market_authenticated || ibkrLoggingOut;
+      }
+    }
+    el.dataset.state = m.kind;
+    el.textContent =
+      m.text +
+      (m.checked_at
+        ? " 检测时间 " + new Date(m.checked_at).toLocaleTimeString()
+        : "") +
+      (m.sso_checked_at
+        ? "；账户会话验证时间 " +
+          new Date(m.sso_checked_at).toLocaleTimeString() +
+          "（最多每60秒验证一次）"
+        : "");
+  },
+});
+document.addEventListener("click", (e) => {
+  if (e.target.closest("#ibkr-login")) gatewayMonitor.start();
+});
+window.addEventListener("focus", () => gatewayMonitor.focus());
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") gatewayMonitor.focus();
+});
+let ibkrSelected = null,
+  ibkrEpoch = 0,
+  ibkrLoggingOut = false;
+function showIbkrSnapshot(r) {
+  const update =
+    r.updated_ms == null ? "未提供时间" : new Date(r.updated_ms).toISOString();
+  $("#ibkr-data-result").innerHTML =
+    panel(
+      "行情与研究指标",
+      table(
+        ["指标", "IBKR 原始值"],
+        r.fields.map(
+          (f) =>
+            `<tr><td>${escape(f.label)}</td><td>${escape(f.value ?? "—")}</td></tr>`,
+        ),
+      ),
+      escape(`${r.availability} · ${update}`),
+    ) +
+    `<p class="help">${r.pending ? "数据正在预热或未获权限，请稍后手动刷新。" : "C 前缀表示前日收盘，H 表示暂停交易；保留供应商原始单位。"} 股息/波动率不等于完整财报；未订阅字段可能缺失。</p>`;
+}
+$("#content").addEventListener("click", async (e) => {
+  const button = e.target.closest("button");
+  if (!button) return;
+  if (!button.id.startsWith("ibkr-") && !button.dataset.ibkrConid) return;
+  if (ibkrLoggingOut) return;
+  const epoch = ibkrEpoch;
+  button.disabled = true;
+  try {
+    if (button.id === "ibkr-logout") {
+      gatewayMonitor.stop();
+      ibkrLoggingOut = true;
+      ibkrEpoch++;
+      ibkrSelected = null;
+      for (const id of [
+        "ibkr-search-result",
+        "ibkr-selected",
+        "ibkr-data-result",
+      ])
+        $("#" + id).innerHTML = "";
+      try {
+        await post("/api/ibkr/logout", {});
+        $("#ibkr-status-result").textContent =
+          "网关已确认登出。连接配置和研究数据保留，需要重新登录。";
+        toast("已登出 IBKR 网关");
+      } catch (err) {
+        $("#ibkr-status-result").textContent =
+          "本地查询缓存已清除，但网关登出未确认，请在官方网关核对会话。";
+        throw err;
+      }
+    }
+    if (button.id === "ibkr-status") {
+      await gatewayMonitor.check();
+    }
+    if (button.id === "ibkr-connect-market") {
+      gatewayMonitor.stop();
+      await post("/api/ibkr/connect-market", {});
+      if (epoch === ibkrEpoch && button.isConnected)
+        gatewayMonitor.start(
+          "已请求连接行情会话，正在等待 IBKR 确认；不会抢占其他会话。",
+        );
+    }
+    if (button.id === "ibkr-prepare") {
+      await post("/api/ibkr/prepare", {});
+      $("#ibkr-status-result").textContent =
+        "行情准备完成。首次快照可能只返回预热信息，请稍后手动刷新。";
+    }
+    if (button.dataset.ibkrConid) {
+      const chosen = button.dataset.ibkrConid;
+      const r = await post("/api/ibkr/detail", { conid: chosen });
+      if (epoch !== ibkrEpoch) return;
+      ibkrSelected = chosen;
+      $("#ibkr-selected").innerHTML = panel(
+        "已选合约",
+        `<div class="panel-body"><strong>${escape(r.companyName || r.company_name || r.symbol || r.ticker || ibkrSelected)}</strong><p class="help">${escape(ibkrSelected)} · ${escape(r.symbol || r.ticker)} · ${escape(r.currency)} · ${escape(r.listingExchange || r.exchange)} · ${escape(r.secType || r.instrument_type)} · ${escape(r.industry || r.category)}</p><div class="actions"><button id="ibkr-snapshot">获取行情与研究指标</button><button id="ibkr-history">获取近月日线预览</button></div></div>`,
+      );
+      $("#ibkr-data-result").innerHTML = "";
+    }
+    if (button.id === "ibkr-snapshot") {
+      const r = await post("/api/ibkr/snapshot", { conid: ibkrSelected });
+      if (epoch !== ibkrEpoch) return;
+      showIbkrSnapshot(r);
+    }
+    if (button.id === "ibkr-history") {
+      const r = await post("/api/ibkr/history", { conid: ibkrSelected });
+      if (epoch !== ibkrEpoch) return;
+      $("#ibkr-data-result").innerHTML =
+        panel(
+          "近月历史日线",
+          table(
+            ["原始时间戳", "开盘", "最高", "最低", "收盘", "供应商成交量"],
+            r.bars.map(
+              (b) =>
+                `<tr>${[b.timestamp, b.o, b.h, b.l, b.c, b.v].map((v) => `<td>${escape(v)}</td>`).join("")}</tr>`,
+            ),
+          ),
+          escape(r.availability),
+        ) +
+        `<p class="help">${escape(r.symbol)} · ${r.bars.length} 根日线。保留 IBKR 时间戳及成交量口径；跨市场交易日、成交量因子和复权尚未标准化，此预览不会写入账本。</p>`;
+    }
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    if (button.id === "ibkr-logout") {
+      ibkrLoggingOut = false;
+      for (const id of [
+        "ibkr-search-result",
+        "ibkr-selected",
+        "ibkr-data-result",
+      ]) {
+        const el = $("#" + id);
+        if (el) el.innerHTML = "";
+      }
+    }
+    if (button.isConnected) button.disabled = false;
+  }
+});
 function drawLine(id, points, currency = false) {
   const canvas = $("#" + id);
   if (!canvas) return;
@@ -602,13 +806,23 @@ async function refresh() {
   state.instruments = ins;
   state.data = d;
   if (!ins.some((i) => i.id === state.selected)) state.selected = ins[0]?.id;
-  $("#mode").textContent = d.demo_present
-    ? "SYNTHETIC DEMO"
-    : "LOCAL / PRIVATE";
+  $("#mode").textContent =
+    d.environment === "test"
+      ? "ISOLATED TEST"
+      : d.environment === "demo"
+        ? "DEMO WORKSPACE"
+        : d.demo_present
+          ? "SYNTHETIC DEMO"
+          : "LOCAL / PRIVATE";
   $("#mode").classList.toggle("demo", d.demo_present);
-  $("#notice").classList.toggle("hidden", !d.demo_present);
+  $("#notice").classList.toggle(
+    "hidden",
+    !d.demo_present && d.environment !== "test",
+  );
   $("#notice").textContent =
-    "合成演示工作区 · 公司、行情、财报与新闻均为虚构，不可用于投资判断。真实数据请使用独立数据库。";
+    d.environment === "test"
+      ? "隔离测试环境 · 仅连接模拟网关与测试数据库，禁止使用真实账户资料。"
+      : "合成演示工作区 · 公司、行情、财报与新闻均为虚构，不可用于投资判断。真实数据请使用独立数据库。";
   universe();
   await render();
 }
@@ -680,6 +894,31 @@ document.addEventListener("submit", async (e) => {
   if (button) button.disabled = true;
   try {
     const v = Object.fromEntries(new FormData(f));
+    if (f.id === "ibkr-settings-form") {
+      gatewayMonitor.stop();
+      await post("/api/ibkr/settings", {
+        port: Number(v.port),
+        ca_pem: v.ca_pem.trim(),
+      });
+      toast("IBKR 连接设置已保存，请重新检测登录状态");
+      await render();
+    }
+    if (f.id === "ibkr-search-form") {
+      if (ibkrLoggingOut) throw new Error("正在登出，请稍候");
+      const epoch = ibkrEpoch;
+      const rows = await post("/api/ibkr/search", {
+        query: v.query,
+        by_name: v.mode === "name",
+      });
+      if (epoch !== ibkrEpoch) return;
+      $("#ibkr-search-result").innerHTML = table(
+        ["标的 / 市场", "类型", "Conid", ""],
+        rows.map(
+          (r) =>
+            `<tr><td>${escape(r.symbol)}<small>${escape(r.companyHeader || r.companyName || r.description)}</small></td><td>${escape(r.secType || r.sections.join(" / "))}</td><td>${escape(r.conid)}</td><td><button type="button" data-ibkr-conid="${escape(r.conid)}">选择</button></td></tr>`,
+        ),
+      );
+    }
     if (f.id === "stress-form") {
       const r = await post("/api/stress", {
         as_of: state.asof,
@@ -817,7 +1056,7 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     $("#search").focus();
   }
-  if (/^[1-6]$/.test(e.key)) {
+  if (/^[1-9]$/.test(e.key)) {
     state.page = Object.keys(names)[Number(e.key) - 1];
     render();
   }
@@ -832,3 +1071,16 @@ try {
     `<div class="empty"><p>${escape(e.message)}</p><p>请启动本地 C++ 服务与 PostgreSQL。</p></div>`,
   );
 }
+
+document.addEventListener("click", async (e) => {
+  if (e.target.id !== "fetch-fed") return;
+  const b = e.target;
+  b.disabled = true;
+  try {
+    await post("/api/news/fetch", {});
+    if (state.page === "news") render();
+  } catch (e) {
+    toast(e.message, true);
+    b.disabled = false;
+  }
+});

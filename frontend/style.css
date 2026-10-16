@@ -917,3 +917,56 @@ pre {
     height: 230px;
   }
 }
+
+#ibkr-search-result {
+  max-height: 320px;
+  overflow: auto;
+}
+
+.gateway-login {
+  display: inline-block;
+  padding: 9px 12px;
+  border: 1px solid #355450;
+  border-radius: 6px;
+  background: #173e38;
+  color: #a9e8d8;
+  text-decoration: none;
+}
+
+.hedge-row {
+  border: 1px solid var(--border, #293541);
+  border-radius: 8px;
+  padding: 18px;
+}
+.hedge-row input {
+  width: 100%;
+  min-width: 0;
+}
+.hedge-row input:disabled,
+.hedge-row select:disabled {
+  opacity: 0.35;
+}
+.hedge-row .form-grid {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+.rail nav button {
+  padding-top: 9px;
+  padding-bottom: 9px;
+}
+
+#ibkr-status-result {
+  border-left: 3px solid currentColor;
+  padding: 10px 12px;
+  line-height: 1.8;
+}
+#ibkr-status-result[data-state="success"],
+#ibkr-status-result[data-state="partial"] {
+  color: var(--accent, #49cbbb);
+}
+#ibkr-status-result[data-state="warning"],
+#ibkr-status-result[data-state="pending"] {
+  color: #e0b66b;
+}
+#ibkr-status-result[data-state="error"] {
+  color: #f18484;
+}

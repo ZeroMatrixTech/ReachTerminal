@@ -23,3 +23,9 @@ Returned claims and numeric examples were independently checked; incorrect claim
 rejected. Core implementation, integration, fixtures and verification were authored and
 performed by the primary agent. Private management journals and API responses are not
 included in the repository. No user account data was sent to DeepSeek.
+
+- World Bank WDI API: https://datahelpdesk.worldbank.org/knowledgebase/articles/898581-api-basic-call-structures
+- Federal Reserve RSS: https://www.federalreserve.gov/feeds/feeds.htm
+- IBKR portfolio summary: https://www.interactivebrokers.com/docs/web-api/api-reference/trading/trading-portfolio/get-portfolio-summary
+
+Release archives include source and synthetic fixtures only; fetched public observations and account summaries remain outside the source package.

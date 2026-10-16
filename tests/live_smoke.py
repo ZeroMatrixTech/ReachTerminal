@@ -1,8 +1,9 @@
-"""Read-only verification of an already populated real research workspace."""
+"""Read-only fixture verification, restricted to an isolated test runtime."""
 import argparse,json,urllib.request
-p=argparse.ArgumentParser();p.add_argument('--url',default='http://127.0.0.1:8788');p.add_argument('--instrument',default='us:ibm');a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--url',required=True);p.add_argument('--instrument',default='us:ibm');a=p.parse_args()
 def get(path):return json.load(urllib.request.urlopen(a.url+path,timeout=60))
 from urllib.parse import urlencode
+assert get('/api/session').get('environment')=='test','Refusing fixture tests against user data'
 r=get('/api/research?'+urlencode({'instrument':a.instrument}))
 d=get('/api/data')
 assert not d['demo_present'],'Use real data workspace'

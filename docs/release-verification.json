@@ -1,0 +1,37 @@
+{
+  "version": "0.1.0",
+  "date": "2026-10-16",
+  "core_assertions": 88,
+  "release_assertions": 39,
+  "official_payload_assertions": 40,
+  "gateway_https_checks": 34,
+  "existing_http_checks": 42,
+  "release_mutation_checks": 7,
+  "real_margin": {
+    "authenticated": false,
+    "margin_success": true,
+    "field_count": 8,
+    "numeric_fields": 8,
+    "fresh_fields": 8,
+    "error": null
+  },
+  "real_public_data": {
+    "world_bank_browser_rows": 16,
+    "fed_payload_rows": 20,
+    "user_ledger_preserved_before_public_import": true,
+    "fed_browser_items": 20
+  },
+  "known_limits": [
+    "European modeled derivatives separate from cash ledger",
+    "Broker margin totals; no internal portfolio-margin replication",
+    "Annual WDI retrieval vintages, no historical publication dates",
+    "CI configured but not remotely executed",
+    "No Git tag, push or public release performed"
+  ],
+  "source_archive": {
+    "fresh_build": true,
+    "ctest_passed": true,
+    "private_cluster_integration_passed": true,
+    "no_runtime_data": true
+  }
+}

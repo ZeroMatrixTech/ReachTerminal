@@ -87,4 +87,7 @@ CREATE TABLE IF NOT EXISTS import_runs(
 CREATE OR REPLACE VIEW ledger_trades AS SELECT id,payload->>'account' AS account,payload->>'instrument' AS instrument,payload->>'strategy' AS strategy,(payload->>'date')::date AS trade_date,(payload->>'quantity')::numeric AS quantity,(payload->>'price')::numeric AS price,(payload->>'fee')::numeric AS fee,payload->>'currency' AS currency FROM trades;
 CREATE OR REPLACE VIEW financial_history AS SELECT id,payload->>'instrument' AS instrument,payload->>'concept' AS concept,payload->>'unit' AS unit,(payload->>'value')::numeric AS value,(payload->>'period_end')::date AS period_end,(payload->>'filed')::date AS filed,payload->>'accession' AS accession FROM facts;
 INSERT INTO schema_versions(version) VALUES (1) ON CONFLICT DO NOTHING;
+CREATE TABLE IF NOT EXISTS macro_observations (id text PRIMARY KEY CHECK(length(id) BETWEEN 1 AND 180),payload jsonb NOT NULL CHECK(jsonb_typeof(payload)='object' AND payload->>'id'=id),created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS hedge_models (id text PRIMARY KEY CHECK(length(id) BETWEEN 1 AND 180),payload jsonb NOT NULL CHECK(jsonb_typeof(payload)='object' AND payload->>'id'=id),created_at timestamptz NOT NULL DEFAULT now());
+INSERT INTO schema_versions(version) VALUES (2) ON CONFLICT DO NOTHING;
 COMMIT;

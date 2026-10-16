@@ -1,6 +1,9 @@
 #include "core.hpp"
+#include "environment.hpp"
+#include "ibkr.hpp"
 #include "imports.hpp"
 #include "market.hpp"
+#include "public_data.hpp"
 #include "store.hpp"
 #include <filesystem>
 #include <httplib.h>
@@ -98,9 +101,15 @@ int main(int argc, char **argv) {
     try {
         curl_global_init(CURL_GLOBAL_DEFAULT);
         std::string root = env("REACH_ROOT", REACH_ROOT),
-                    dsn = env("REACH_DATABASE_URL", "dbname=reachterminal");
+                    dsn = env("REACH_DATABASE_URL", "dbname=reachterminal_live");
         Store store(dsn);
+        auto mode = env("REACH_ENV", "user");
+        workspace_environment(mode, store.database_name());
         store.migrate(root);
+        auto import_batch = [&](const json &batch) {
+            user_batch(mode, batch);
+            return store.import(batch);
+        };
         std::string command = argc > 1 ? argv[1] : "serve";
         if (command == "init") {
             std::cout << "Database ready\n";
@@ -118,7 +127,7 @@ int main(int argc, char **argv) {
                 batch = sec_import(json::parse(body), argv[3]);
             } else
                 batch = json::parse(body);
-            std::cout << store.import(batch).dump(2) << '\n';
+            std::cout << import_batch(batch).dump(2) << '\n';
             return 0;
         }
         if (command == "export") {
@@ -196,10 +205,16 @@ int main(int argc, char **argv) {
             return d;
         };
         route("/api/session", false, [&](const auto &) {
-            return json{{"token", token}, {"version", "0.1.0"}, {"mode", "local-read-only-broker"}};
+            return json{{"token", token},
+                        {"version", "0.1.0"},
+                        {"mode", "local-read-only-broker"},
+                        {"environment", mode}};
         });
         route("/api/health", false, [&](const auto &) {
-            return json{{"ok", true}, {"database", "PostgreSQL"}, {"trading_enabled", false}};
+            return json{{"ok", true},
+                        {"database", "PostgreSQL"},
+                        {"environment", mode},
+                        {"trading_enabled", false}};
         });
         route("/api/instruments", false, [&](const auto &) { return store.load()["instruments"]; });
         route("/api/portfolio", false,
@@ -238,7 +253,8 @@ int main(int argc, char **argv) {
                     if (r.value("source", "") == "Synthetic demo")
                         demo = true;
             }
-            return json{{"counts", counts},
+            return json{{"environment", mode},
+                        {"counts", counts},
                         {"demo_present", demo},
                         {"imports", store.runs()},
                         {"consensus", "User-supplied licensed records only; no "
@@ -247,23 +263,25 @@ int main(int argc, char **argv) {
         });
         route("/api/export", false, [&](const auto &) { return store.load(); });
         route("/api/import", true,
-              [&](const auto &req) { return store.import(json::parse(req.body)); });
+              [&](const auto &req) { return import_batch(json::parse(req.body)); });
         route("/api/demo", true, [&](const auto &) {
+            require(mode != "user", "Demo import disabled in user workspace");
             auto data = store.load();
             for (auto &k : collections)
                 require(data[k].empty(), "Demo can only load into an empty database; keep real and "
                                          "synthetic data separate");
-            return store.import(json::parse(read_file(root + "/examples/demo.json")));
+            return import_batch(json::parse(read_file(root + "/examples/demo.json")));
         });
         route("/api/import/flex", true,
-              [&](const auto &req) { return store.import(flex_import(req.body)); });
+              [&](const auto &req) { return import_batch(flex_import(req.body)); });
         route("/api/import/sec", true, [&](const auto &req) {
             require(req.has_param("instrument"), "Instrument required");
-            return store.import(
+            return import_batch(
                 sec_import(json::parse(req.body), req.get_param_value("instrument")));
         });
         std::chrono::steady_clock::time_point lastfetch{};
         route("/api/sec/fetch", true, [&](const auto &req) {
+            require(mode == "user", "External SEC requests disabled outside user workspace");
             auto v = json::parse(req.body);
             require(std::chrono::steady_clock::now() - lastfetch > std::chrono::seconds(2),
                     "Wait two seconds between SEC fetches");
@@ -277,7 +295,7 @@ int main(int argc, char **argv) {
             }
             require(bound, "Registered SEC CIK must match requested CIK");
             auto raw = json::parse(fetch_sec(str(v, "cik"), env("REACH_SEC_USER_AGENT")));
-            return store.import(sec_import(raw, str(v, "instrument")));
+            return import_batch(sec_import(raw, str(v, "instrument")));
         });
         route("/api/providers", false, [&](const auto &) {
             return json{{"sec_configured", !env("REACH_SEC_USER_AGENT").empty()},
@@ -287,6 +305,7 @@ int main(int argc, char **argv) {
         });
         std::chrono::steady_clock::time_point last_daily{};
         route("/api/market/daily", true, [&](const auto &req) {
+            require(mode == "user", "External daily requests disabled outside user workspace");
             auto v = json::parse(req.body);
             auto data = store.load();
             for (auto &r : data["instruments"])
@@ -304,9 +323,80 @@ int main(int argc, char **argv) {
             auto raw = json::parse(
                 fetch_alpha_daily(str(ins, "symbol"), env("REACH_ALPHA_API_KEY", "demo")));
             auto batch = alpha_daily_import(raw, ins);
-            auto result = store.import(batch);
+            auto result = import_batch(batch);
             result["latest"] = batch["raw_sources"][0]["date"];
             return result;
+        });
+        Ibkr ibkr(root, mode);
+        route("/api/ibkr/settings", false, [&](const auto &) { return ibkr.settings(); });
+        route("/api/ibkr/settings", true, [&](const auto &req) {
+            ibkr.save(json::parse(req.body));
+            return ibkr.settings();
+        });
+        route("/api/ibkr/accounts", true, [&](const auto &) { return ibkr.accounts(); });
+        route("/api/ibkr/margin", true,
+              [&](const auto &req) { return ibkr.margin(str(json::parse(req.body), "account")); });
+        route("/api/ibkr/logout", true, [&](const auto &) { return ibkr.logout(); });
+        route("/api/ibkr/connect-market", true,
+              [&](const auto &) { return ibkr.connect_market(); });
+        route("/api/ibkr/connection", true, [&](const auto &) { return ibkr.connection(); });
+        route("/api/ibkr/status", true, [&](const auto &) { return ibkr.status(); });
+        route("/api/ibkr/prepare", true, [&](const auto &) {
+            ibkr.prepare();
+            return json{{"ok", true}};
+        });
+        route("/api/ibkr/search", true, [&](const auto &req) {
+            auto v = json::parse(req.body);
+            return ibkr.search(str(v, "query"), v.value("by_name", false));
+        });
+        route("/api/ibkr/detail", true, [&](const auto &req) {
+            return ibkr.detail(ibkr_conid(json::parse(req.body).at("conid")));
+        });
+        route("/api/ibkr/snapshot", true, [&](const auto &req) {
+            return ibkr.snapshot(ibkr_conid(json::parse(req.body).at("conid")));
+        });
+        route("/api/ibkr/history", true, [&](const auto &req) {
+            return ibkr.history(ibkr_conid(json::parse(req.body).at("conid")));
+        });
+        route("/api/hedge/analyze", true,
+              [&](const auto &req) { return hedge_book(json::parse(req.body)); });
+        route("/api/hedge/models", false, [&](const auto &req) {
+            json rows = json::array();
+            auto data = store.load();
+            for (auto &v : data["hedge_models"])
+                if (str(v, "date") <= asof(req))
+                    rows.push_back(v);
+            return rows;
+        });
+        route("/api/hedge/models", true, [&](const auto &req) {
+            auto v = json::parse(req.body);
+            v["result"] = hedge_book(v.at("assumptions"));
+            v["id"] = "hedge-" + hash(v.dump() + std::to_string(epoch_ms()));
+            return import_batch(json{{"hedge_models", json::array({v})}});
+        });
+        route("/api/macro", false,
+              [&](const auto &req) { return macro_view(store.load(), asof(req)); });
+        auto last_public = std::chrono::steady_clock::time_point{};
+        auto public_pacing = [&]() {
+            auto now = std::chrono::steady_clock::now();
+            require(now - last_public > std::chrono::seconds(2),
+                    "Public source pacing: wait two seconds");
+            last_public = now;
+        };
+        route("/api/macro/fetch", true, [&](const auto &req) {
+            auto v = json::parse(req.body);
+            auto c = str(v, "country"), i = str(v, "indicator");
+            auto url = worldbank_url(c, i);
+            require(mode == "user", "Public fetch disabled outside user workspace");
+            public_pacing();
+            auto raw = json::parse(public_fetch(mode, url));
+            return import_batch(worldbank_import(raw, c, i, epoch_ms()));
+        });
+        route("/api/news/fetch", true, [&](const auto &) {
+            require(mode == "user", "Public fetch disabled outside user workspace");
+            public_pacing();
+            return import_batch(fed_news_import(
+                public_fetch(mode, "https://www.federalreserve.gov/feeds/press_all.xml")));
         });
         route("/api/dcf", true, [&](const auto &req) { return dcf(json::parse(req.body)); });
         route("/api/stress", true, [&](const auto &req) {
@@ -319,7 +409,7 @@ int main(int argc, char **argv) {
                 "note-" +
                 hash(v.dump() +
                      std::to_string(std::chrono::system_clock::now().time_since_epoch().count()));
-            return store.import(json{{"notes", json::array({v})}});
+            return import_batch(json{{"notes", json::array({v})}});
         });
         route("/api/valuations", true, [&](const auto &req) {
             auto v = json::parse(req.body);
@@ -329,9 +419,14 @@ int main(int argc, char **argv) {
                 "valuation-" +
                 hash(v.dump() +
                      std::to_string(std::chrono::system_clock::now().time_since_epoch().count()));
-            return store.import(json{{"valuations", json::array({v})}});
+            return import_batch(json{{"valuations", json::array({v})}});
         });
-        require(server.set_mount_point("/", root + "/frontend"), "Frontend directory missing");
+        for (auto path :
+             {"/", "/index.html", "/app.js", "/release.js", "/gateway-session.js", "/style.css"})
+            server.Get(path, [path](const httplib::Request &, httplib::Response &res) {
+                auto asset = assets::find(path);
+                res.set_content(asset->body.data(), asset->body.size(), std::string(asset->mime));
+            });
         std::cout << "ReachTerminal 0.1.0 · http://127.0.0.1:" << port
                   << " · PostgreSQL · no broker order endpoints" << std::endl;
         require(server.listen("127.0.0.1", std::stoi(port)), "Cannot bind local port");
