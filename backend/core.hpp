@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <ctime>
 #include <deque>
 #include <iomanip>
 #include <map>
@@ -96,9 +97,20 @@ inline void source(const json &v) {
                 u.starts_with("demo:"),
             "Source URL must use http(s), manual: or demo:");
 }
+inline std::string retrieval_date(int64_t ms) {
+    require(ms > 0 && ms <= 4102444800000LL, "Invalid retrieval epoch");
+    std::time_t t = ms / 1000;
+    std::tm tm{};
+    require(gmtime_r(&t, &tm) != nullptr, "Invalid retrieval timestamp");
+    std::ostringstream out;
+    out << std::put_time(&tm, "%Y-%m-%d");
+    return out.str();
+}
 inline const std::vector<std::string> collections = {
-    "instruments", "trades", "cashflows",       "quotes",    "fx",          "facts",  "bars",
-    "news",        "notes",  "reconciliations", "estimates", "raw_sources", "splits", "valuations"};
+    "instruments", "trades",      "cashflows", "quotes",     "fx",
+    "facts",       "bars",        "news",      "notes",      "reconciliations",
+    "estimates",   "raw_sources", "splits",    "valuations", "macro_observations",
+    "hedge_models"};
 inline json empty_data() {
     json j = json::object();
     for (auto &k : collections)
@@ -106,6 +118,7 @@ inline json empty_data() {
     return j;
 }
 inline json dcf(const json &v);
+inline json hedge_book(const json &v);
 inline void validate(const std::string &kind, const json &v) {
     require(v.is_object(), "Record must be object");
     id(str(v, "id"));
@@ -243,6 +256,37 @@ inline void validate(const std::string &kind, const json &v) {
         source(v);
         date(str(v, "date"));
         require(v.contains("document"), "Raw document required");
+    } else if (kind == "macro_observations") {
+        date(str(v, "date"));
+        date(str(v, "period_end"));
+        source(v);
+        require(str(v, "period_end") <= str(v, "date"), "Macro period is in future");
+        require(std::regex_match(str(v, "country"), std::regex("[A-Z]{3}")),
+                "Invalid macro country");
+        auto indicator = str(v, "indicator");
+        require(indicator == "gdp" || indicator == "growth" || indicator == "inflation",
+                "Invalid macro indicator");
+        require(str(v, "frequency") == "annual" &&
+                    str(v, "unit") == (indicator == "gdp" ? "current USD" : "percent"),
+                "Invalid macro unit/frequency");
+        require(v.contains("known_at") && v["known_at"].is_null(),
+                "Historical release date unavailable");
+        require(v.contains("retrieved_at_ms") && v["retrieved_at_ms"].is_number_integer() &&
+                    v["retrieved_at_ms"].get<int64_t>() > 0,
+                "Invalid macro retrieval timestamp");
+        require(str(v, "date") == retrieval_date(v["retrieved_at_ms"].get<int64_t>()) &&
+                    str(v, "date") <= today(),
+                "Macro visibility must match actual retrieval date");
+        require(v.contains("value") &&
+                    (v["value"].is_null() ||
+                     (v["value"].is_number() && std::isfinite(v["value"].get<double>()) &&
+                      std::abs(v["value"].get<double>()) <= 1e18)),
+                "Invalid macro value");
+    } else if (kind == "hedge_models") {
+        date(str(v, "date"));
+        str(v, "title");
+        require(v.at("result") == hedge_book(v.at("assumptions")),
+                "Hedge result differs from assumptions");
     } else if (kind == "valuations") {
         id(str(v, "instrument"));
         date(str(v, "date"));
@@ -783,3 +827,5 @@ inline json stress(const json &p, const json &input) {
             {"model", p["scenario_model"]}};
 }
 } // namespace reach
+
+#include "derivatives.hpp"

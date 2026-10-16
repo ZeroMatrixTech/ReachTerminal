@@ -1,5 +1,6 @@
 #pragma once
 #include "core.hpp"
+#include "embedded_assets.hpp"
 #include <fstream>
 #include <libpq-fe.h>
 #include <memory>
@@ -28,11 +29,11 @@ class Store {
         require(conn && PQstatus(conn.get()) == CONNECTION_OK,
                 "PostgreSQL connection failed; check REACH_DATABASE_URL");
     }
-    void migrate(const std::string &root) {
-        std::ifstream f(root + "/db/001_initial.sql");
-        require(bool(f), "Missing database migration");
-        std::string sql((std::istreambuf_iterator<char>(f)), {});
-        query(sql);
+    std::string database_name() const {
+        return PQdb(conn.get());
+    }
+    void migrate(const std::string &) {
+        query(std::string(assets::schema()));
     }
     json load() {
         bool own_transaction = PQtransactionStatus(conn.get()) == PQTRANS_IDLE;

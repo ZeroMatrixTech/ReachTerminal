@@ -11,6 +11,7 @@ if [[ -n "${REACH_DATABASE_URL:-}" ]]; then
   echo "Unset REACH_DATABASE_URL before live.sh to keep the real-data workspace isolated." >&2
   exit 1
 fi
+export REACH_ENV=user
 export REACH_DB_NAME=reachterminal_live
 export REACH_PORT="${REACH_PORT:-8788}"
 exec "$repo_dir/scripts/dev.sh"

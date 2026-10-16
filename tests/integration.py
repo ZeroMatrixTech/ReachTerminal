@@ -43,7 +43,9 @@ def check(ok, label):
 def near(a, b, label):
     check(abs(D(str(a))-D(str(b))) < D('0.00001'), label)
 
-token = request('/api/session')['token']
+session = request('/api/session')
+assert session.get('environment') == 'test', 'Refusing mutating tests outside isolated test runtime'
+token = session['token']
 check(request('/api/health')['trading_enabled'] is False, 'no trading enabled')
 counts = request('/api/data')['counts']
 check(not any(counts.values()), 'fresh disposable database precondition')
@@ -156,3 +158,9 @@ check(len(export['trades'])==len(demo['trades'])+36,'export roundtrip record cou
 report={'ok':True,'checks':len(checks),'passed':checks,'scope':'Disposable synthetic DB; no real IBKR account or external data fetched'}
 if args.report:Path(args.report).write_text(json.dumps(report,indent=2)+'\n')
 print(json.dumps(report,indent=2))
+
+for asset in ['index.html','app.js','release.js','gateway-session.js','style.css']:
+    with urllib.request.urlopen(args.url+'/'+asset) as response:
+        assert response.read()==(root/'frontend'/asset).read_bytes(),asset
+        assert response.headers['Cache-Control']=='no-store'
+print('5 embedded frontend assets served byte-for-byte with no frontend directory')

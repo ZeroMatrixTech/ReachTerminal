@@ -1,0 +1,29 @@
+{
+  "date": "2026-10-16",
+  "gateway_isolated_checks": 46,
+  "core_assertions": 88,
+  "release_assertions": 39,
+  "ui_state_checks": 22,
+  "http_regression_checks": 42,
+  "release_mutation_checks": 7,
+  "actual_after_fix": {
+    "connection": {
+      "authenticated": true,
+      "connected": true,
+      "competing": false,
+      "market_ready": true,
+      "sso_valid": true
+    },
+    "search_contracts": 22,
+    "prepared": true,
+    "daily_bars": 21
+  },
+  "privacy": "No account identifiers, amounts, credentials or raw gateway response recorded",
+  "fixed": [
+    "post-init account bootstrap",
+    "bounded readiness polling",
+    "empty account preparation rejection",
+    "initialization status",
+    "endpoint-specific sanitized HTTP errors"
+  ]
+}

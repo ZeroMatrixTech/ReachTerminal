@@ -6,6 +6,13 @@ C++20 backend, PostgreSQL database. No broker order submission code.
 第一版将基本面研究、策略核算、估值与风险放在同一个本地工作区。
 软件不收取订阅费；第三方数据的费用、覆盖和使用权限仍由对应来源决定。
 
+## IBKR read-only data queries
+
+Client Portal Gateway connection settings, symbol/company search, contract details,
+market snapshots and historical daily previews are available in Data Center.
+Run `./scripts/gateway.sh`, sign in yourself, then use `./scripts/live.sh`.
+See [IBKR setup, scope and verification](docs/ibkr.md). No generic API key is required.
+
 ## Real public data
 
 Run `./scripts/live.sh` for the separate real-data workspace on **http://127.0.0.1:8788**.
@@ -98,6 +105,7 @@ its connection only inside the launched process; another terminal must set it ex
 From the repository root, with the development database running:
 
 ```sh
+export REACH_ENV=demo
 export REACH_DATABASE_URL="host='$PWD/.local/socket' port=55433 dbname=reachterminal"
 ./build/reachterminal export > /private/location/workspace.json
 ```
@@ -118,7 +126,7 @@ See [data contract](docs/data-contract.md) and [architecture](docs/architecture.
 
 **A working first release, not a replacement for a complete institutional data feed.**
 
-- No TWS/Gateway live connection, real-time quote stream, broker margin engine,
+- No TWS account stream, continuous real-time quote stream, broker margin engine,
   derivatives accounting, options Greeks, automatic global filings parser, full-text
   news feed or bundled global analyst-consensus history in this release.
 - SEC mapping covers an explicit US-GAAP/DEI subset, not custom tags, segments or IFRS
@@ -141,14 +149,23 @@ See [data contract](docs/data-contract.md) and [architecture](docs/architecture.
 
 ```sh
 ctest --test-dir build --output-on-failure
-python3 tests/integration.py --url http://127.0.0.1:8787 --root .
+python3 scripts/test-isolated.py
 ```
 
-Run integration tests against a **fresh disposable database**; they intentionally import
-synthetic records. See [verification](docs/verification.md) for measured coverage.
+The isolated runner creates a fresh private PostgreSQL cluster, mock HTTPS Gateway and
+configuration directory. Mutating tests refuse user/demo instances before any write.
+Test runtimes cannot connect to real Gateway ports or external SEC/Alpha services. See [verification](docs/verification.md) for measured coverage.
 Financial changes need independently computed expected values and regression cases.
 Contributions for additional markets should include source terms, reproducible fixtures,
 unit/period mapping and missing-data behavior. Keep provider adapters separate from accounting.
 
 MIT applies to ReachTerminal code. Dependencies and external data retain their own licenses.
 See [third-party notices](docs/third-party.md) and [roadmap](docs/roadmap.md).
+
+## v0.1.0 扩展
+
+新增衍生品假设对冲、IBKR 券商保证金监控、世界银行年度宏观和美联储官方新闻工作区。详见 [发布范围与验收](docs/release-0.1.0.md)。这些工作区保留数据来源和未知状态；欧式期权模型、券商保证金和现金股票账本各自计算。
+
+## 本地内嵌发行版
+
+前端和迁移 SQL 已内嵌到 C++ 可执行程序；不依赖运行目录里的前端资源。二进制打包与网关登录反馈见 [本地内嵌说明](docs/embedded-local.md)。

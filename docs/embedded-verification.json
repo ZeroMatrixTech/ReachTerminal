@@ -1,0 +1,22 @@
+{
+  "date": "2026-10-16",
+  "frontend": "Embedded in C++ binary, no frontend/db directories in isolated runtime",
+  "core_assertions": 88,
+  "release_assertions": 39,
+  "gateway_checks": 46,
+  "http_regression_checks": 42,
+  "release_mutation_checks": 7,
+  "embedded_asset_comparisons": 5,
+  "ui_state_checks": 22,
+  "real_gateway": {
+    "sso_valid": true,
+    "brokerage_authenticated": true,
+    "browser_message_verified": true,
+    "manual_market_connection": "Non-competing init exercised during diagnosis; subsequent real authentication/search/history verified; no trading",
+    "market_ready": true
+  },
+  "binary_sha256": "f302bcffe91e5428a6cedd828f1e5ea002e017f165dd97b68de92dd9b94d22f5",
+  "binary_archive_sha256": "a915cf0b69238c5b08df9701da152da6f583379c78e42ff4ace84617fa20517d",
+  "limits": "Linux dynamically linked binary, external PostgreSQL and device-local Gateway required",
+  "latest_debug_report": "ibkr-400-verification.json"
+}

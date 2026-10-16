@@ -3,6 +3,7 @@ set -euo pipefail
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
 deps="$repo_dir/.local/deps"
+export REACH_ENV="${REACH_ENV:-demo}"
 cmake_args=()
 if [[ -d "$deps/usr" ]]; then
   export PATH="$deps/usr/bin:$PATH"
