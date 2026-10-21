@@ -19,6 +19,18 @@ jobs:
           node --check frontend/release.js
           node --check frontend/gateway-session.js
           node tests/gateway_session_test.mjs
+      - name: Initialize ephemeral CI container identity
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, uuid
+          path = Path("/etc/machine-id")
+          value = path.read_text().strip() if path.exists() else ""
+          if not value:
+              path.write_text(uuid.uuid4().hex + "\n")
+          elif not re.fullmatch(r"[0-9a-fA-F]{32}", value):
+              raise SystemExit("Invalid CI container machine identity")
+          PY
       - name: Private database and synthetic Gateway integration
         run: |
           useradd -m reachtest
