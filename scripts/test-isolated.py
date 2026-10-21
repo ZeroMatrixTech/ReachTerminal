@@ -43,6 +43,16 @@ try:
  command([sys.executable,root/'tests/integration.py','--url',url,'--root',root,'--report',run/'integration-report.json'])
  command([sys.executable,root/'tests/release_integration.py','--url',url])
  print('ISOLATED_TEST_REPORTS='+str(run))
+except BaseException:
+ print('ISOLATED_TEST_LOGS='+str(run),file=sys.stderr,flush=True)
+ for name in ('app.log','mock.log','postgres.log'):
+  path=run/name
+  if path.is_file():
+   print('--- '+name+' (last 16384 bytes) ---',file=sys.stderr)
+   with path.open('rb') as log:
+    log.seek(max(0,path.stat().st_size-16384))
+    print(log.read().decode('utf-8','replace'),file=sys.stderr,flush=True)
+ raise
 finally:
  for p in reversed(processes):
   p.terminate()

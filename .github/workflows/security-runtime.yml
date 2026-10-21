@@ -1,0 +1,13 @@
+name: Gateway runtime security guard
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  runtime-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check security boundary and launcher syntax
+        run: |
+          PYTHONDONTWRITEBYTECODE=1 python3 tests/runtime_guard_test.py
+          bash -n scripts/gateway.sh
