@@ -9,7 +9,7 @@ jobs:
       - name: Install build and isolated-test dependencies
         run: |
           apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y cmake ninja-build g++ pkg-config libpq-dev libcurl4-openssl-dev libssl-dev libxml2-dev nlohmann-json3-dev libcpp-httplib-dev python3 postgresql openssl nodejs
+          DEBIAN_FRONTEND=noninteractive apt-get install -y cmake ninja-build g++ pkg-config libpq-dev libcurl4-openssl-dev libssl-dev libxml2-dev nlohmann-json3-dev libcpp-httplib-dev python3 postgresql openssl nodejs libgtk-3-dev xvfb xauth
       - name: Build and numerical checks
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release

@@ -1,5 +1,7 @@
 # ReachTerminal
 
+默认使用 **C++ / GTK 原生桌面前端**，不需要浏览器或 WebView。编译后运行 `./scripts/desktop.sh`；参见 [原生桌面说明](docs/native-desktop.md)。IBKR 官方网关登录与双重验证仍使用其官方外部登录流程。
+
 An open-source, self-hosted investment research terminal. Browser frontend,
 C++20 backend, PostgreSQL database. No broker order submission code.
 

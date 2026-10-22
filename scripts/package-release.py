@@ -6,7 +6,7 @@ root=Path(__file__).resolve().parents[1]
 p=argparse.ArgumentParser();p.add_argument('--output',required=True);a=p.parse_args();out=Path(a.output).resolve();out.mkdir(parents=True,exist_ok=True)
 version=re.search(r'project\(ReachTerminal VERSION ([0-9.]+)',(root/'CMakeLists.txt').read_text())[1]
 name=f'ReachTerminal-{version}';target=out/(name+'.tar.gz')
-allowed={'backend':{'.hpp','.cpp'},'frontend':{'.html','.js','.css'},'db':{'.sql'},'scripts':{'.py','.sh'},'tests':{'.cpp','.py','.mjs'},'docs':{'.md','.json','.png'},'examples':{'.json','.csv','.xml'},'.github':{'.yml','.yaml'}}
+allowed={'backend':{'.hpp','.cpp'},'desktop':{'.hpp','.cpp'},'frontend':{'.html','.js','.css'},'db':{'.sql'},'scripts':{'.py','.sh'},'tests':{'.cpp','.py','.mjs'},'docs':{'.md','.json','.png'},'examples':{'.json','.csv','.xml'},'.github':{'.yml','.yaml'}}
 files=[root/f for f in ['CMakeLists.txt','README.md','LICENSE','.gitignore','.clang-format']]
 for directory,extensions in allowed.items():
  for f in (root/directory).rglob('*'):
