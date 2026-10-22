@@ -42,6 +42,17 @@ try:
  command([sys.executable,root/'tests/ibkr_gateway_test.py','--url',url,'--fixture-dir',run])
  command([sys.executable,root/'tests/integration.py','--url',url,'--root',root,'--report',run/'integration-report.json'])
  command([sys.executable,root/'tests/release_integration.py','--url',url])
+ native=root/'build/reachterminal-desktop'
+ if native.exists():
+  env['REACH_DESKTOP_PORT']=str(http_port)
+  env['G_DEBUG']='fatal-criticals'
+  native_args=[native,'--self-test','--snapshot',run/'native-desktop.png']
+  if env.get('DISPLAY') or env.get('WAYLAND_DISPLAY'):command(native_args,timeout=90)
+  else:
+   import shutil
+   xvfb=shutil.which('xvfb-run')
+   if xvfb:env['GDK_BACKEND']='x11';command([xvfb,'-a',*native_args],timeout=90)
+   else:raise RuntimeError('Native desktop built but no graphical test display; install xvfb')
  print('ISOLATED_TEST_REPORTS='+str(run))
 except BaseException:
  print('ISOLATED_TEST_LOGS='+str(run),file=sys.stderr,flush=True)
